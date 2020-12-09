@@ -1,0 +1,175 @@
+a）使用openCV和pcl将2D图像转换成3D点云（c++实现）
+b）深度相机的图像和深度实时显示（python实现，深度是转换成图片显示的）
+c）上面生成的2张图是怎么转换成3D的呢
+d）如何检测图中物体的深度或者坐标呢
+***********************************************************************************************************************
+a）使用openCV和pcl将2D图像转换成3D点云（c++实现）
+参考环境：windows 8，visual studio c++ 2010 
+	opencv  3.00beta，pcl 1.6.0 
+
+#程序开始
+
+#include <iostream>
+#include <string>
+
+#include "opencv2/imgcodecs.hpp"
+#include "opencv2/highgui/highgui.hpp"
+
+#include <pcl/io/pcd_io.h>
+#include <pcl/point_types.h>
+
+using namespace std;
+using namespace cv;
+
+// 定义点云类型
+typedef pcl::PointXYZRGBA PointT;
+typedef pcl::PointCloud<PointT> PointCloud;
+
+// 相机内参
+const double camera_factor = 1000;
+const double camera_cx = 325.5;
+const double camera_cy = 253.5;
+const double camera_fx = 518.0;
+const double camera_fy = 519.0;
+
+// 主函数
+int main( int argc, char** argv )
+{
+// 读取./data/rgb.png和./data/depth.png，并转化为点云
+// 图像矩阵
+
+// 使用cv::imread()来读取图像
+// API: http://docs.opencv.org/modules/highgui/doc/reading_and_writing_images_and_video.html?highlight=imread#cv2.imread
+cv::Mat rgb, depth;
+// rgb 图像是8UC3的彩色图像
+rgb = cv::imread( "C:\\study\\1341847980.722988.png" );
+
+// depth 是16UC1的单通道图像，注意flags设置-1，表示读取原始数据不做任何修改
+depth = cv::imread( "C:\\study\\1341847980.723020.png", -1 );
+
+// 点云变量
+// 使用智能指针，创建一个空点云。这种指针用完会自动释放。
+PointCloud::Ptr cloud ( new PointCloud );
+// 遍历深度图
+for (int m = 0; m < depth.rows; m++)
+for (int n=0; n < depth.cols; n++)
+{
+// 获取深度图中(m,n)处的值
+ushort d = depth.ptr<ushort>(m)[n];
+// d 可能没有值，若如此，跳过此点
+if (d == 0)
+continue;
+// d 存在值，则向点云增加一个点
+PointT p;
+
+// 计算这个点的空间坐标
+p.z = double(d) / camera_factor;
+p.x = (n - camera_cx) * p.z / camera_fx;
+p.y = (m - camera_cy) * p.z / camera_fy;
+
+// 从rgb图像中获取它的颜色
+// rgb是三通道的BGR格式图，所以按下面的顺序获取颜色
+p.b = rgb.ptr<uchar>(m)[n*3];
+p.g = rgb.ptr<uchar>(m)[n*3+1];
+p.r = rgb.ptr<uchar>(m)[n*3+2];
+
+// 把p加入到点云中
+cloud->points.push_back( p );
+}
+
+// 设置并保存点云
+cloud->height = 1;
+cloud->width = cloud->points.size();
+cout<<"point cloud size = "<<cloud->points.size()<<endl;
+cloud->is_dense = false;
+pcl::io::savePCDFile( "C:\\study\\pointcloud.pcd", *cloud );
+// 清除数据并退出
+cloud->points.clear();
+cout<<"Point cloud saved."<<endl;
+return 0;
+}
+
+//程序结束
+
+程序的结果是2张图片，形成一个立体点云图片
+
+pointcloud.pcd 放在目录c:\study 下面， 输入的图片也是放在c:\study下面。
+
+那结果图片是怎么显示出来的呢？我就用pcl 的教学文件cloud_viewer。
+
+电脑上的目录是：
+C:\Program Files (x86)\PCL 1.6.0\share\doc\pcl-1.6\tutorials\sources\cloud_viewer
+
+b）深度相机的图像和深度实时显示（python实现，深度是转换成图片显示的）：
+首先安装好realsense2
+（官网提供的软件工具与文档资料介绍
+https://realsense.intel.com/intel-realsense-downloads/#firmware
+1、Intel RealSense Viewer.exe 是最主要的软件，功能是查看视频流，并对视频流进行后期处理，这个官方GitHub有提供完整的c++工程，编译了可以直接运行；
+2、Depth Quality Tool for Intel RealSense Cameras.exe 用于测试z方向的深度数据是否准，将rgbd相机正对着白色的墙面或其他，然后对比卷尺量的距离与软件上显示的距离，来判断是否需要校准相机；
+3、Intel RealSense D400 Series Dynamic Calibration Software Tools校准工具，如果前面计算的距离不准，可以利用这个软件进行校准，在苹果或安卓手机搜realsense这个软件，安装打开，就是显示一张类似棋盘格标定板的图片，然后配合校准工具，按照上面的提示晃动手机即可校准，输出外参R\T。
+）
+#程序开始
+import pyrealsense2 as rs
+import numpy as np
+import cv2
+ 
+# Configure depth and color streams
+pipeline = rs.pipeline()
+config = rs.config()
+config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
+config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+# Start streaming
+pipeline.start(config)
+try:
+    while True:
+        # Wait for a coherent pair of frames: depth and color
+        frames = pipeline.wait_for_frames()
+        depth_frame = frames.get_depth_frame()
+        color_frame = frames.get_color_frame()
+        if not depth_frame or not color_frame:
+            continue
+        # Convert images to numpy arrays
+ 
+        depth_image = np.asanyarray(depth_frame.get_data())
+ 
+        color_image = np.asanyarray(color_frame.get_data())
+ 
+        # Apply colormap on depth image (image must be converted to 8-bit per pixel first)
+        depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET)
+        # Stack both images horizontally
+        images = np.hstack((color_image, depth_colormap))
+        # Show images
+        cv2.namedWindow('RealSense', cv2.WINDOW_AUTOSIZE)
+        cv2.imshow('RealSense', images)
+        key = cv2.waitKey(1)
+        # Press esc or 'q' to close the image window
+        if key & 0xFF == ord('q') or key == 27:
+            cv2.destroyAllWindows()
+            break
+        elif key & 0xFF == ord('s'):
+            cv2.imwrite('savefile.jpg',images)
+finally:
+    # Stop streaming
+    pipeline.stop()
+
+c）上面生成的2张图是怎么转换成3D的呢
+首先将2张图片分别存在各自的一个文件中，然后根据a）.
+d）如何检测图中物体的深度或者坐标呢
+先了解相机的基本参数如下：
+//相机内参（仅供参考）
+const double camera_factor = 1000;
+const double camera_cx = 325.5;
+const double camera_cy = 253.5;
+const double camera_fx = 518.0;
+const double camera_fy = 519.0;
+
+然后就可以计算了（上文c++代码）：
+// 获取深度图中(m,n)处的值
+ushort d = depth.ptr<ushort>(m)[n];
+// d 可能没有值，若如此，跳过此点
+if (d == 0)continue; //说明这点没有深度值
+
+// 计算这个点的空间坐标
+p.z = double(d) / camera_factor;
+p.x = (n - camera_cx) * p.z / camera_fx;
+p.y = (m - camera_cy) * p.z / camera_fy;
